@@ -46,8 +46,8 @@ gwt-add() {
     done
 
     # 3. Assign positional variables
-    NEW_BRANCH="${ARGS[0]}"
-    [[ -n "${ARGS[1]}" ]] && PARENT_BRANCH="${ARGS[1]}"
+    NEW_BRANCH="${ARGS[1]}"
+    [[ -n "${ARGS[2]}" ]] && PARENT_BRANCH="${ARGS[2]}"
 
     # 4. Handle --upstream_current
     if [ "$UPSTREAM_CURRENT" = true ]; then
