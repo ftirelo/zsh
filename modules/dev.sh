@@ -3,6 +3,8 @@
 
 alias code="/Applications/Visual\ Studio\ Code.app/Contents/Resources/app/bin/code"
 
+alias cursor="/Applications/Cursor.app/Contents/Resources/app/bin/cursor"
+
 # Bring the VS Code window for the current directory to the front
 vcf() {
     local target_dir=${1:-$(pwd)}
