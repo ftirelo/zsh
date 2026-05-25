@@ -11,3 +11,5 @@ vcf() {
     # Force macOS to bring VS Code to the foreground
     osascript -e 'tell application "Visual Studio Code" to activate'
 }
+
+alias vault="bun scripts/vault/vault.ts"
