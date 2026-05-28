@@ -83,3 +83,28 @@ gwt-add() {
         echo "Done! You can access it at: cd $WT_PATH"
     fi
 }
+
+gcdw() {
+  local name="$1"
+  local wt_path
+  wt_path=$(git worktree list --porcelain | awk -v n="$name" '
+    /^worktree / { p = $2 }
+    /^branch / {
+      sub("refs/heads/", "", $2)
+      if ($2 == n || p ~ n"$") { print p; exit }
+    }
+  ')
+  if [[ -n "$wt_path" ]]; then
+    cd "$wt_path"
+  else
+    echo "No worktree matching: $name" >&2
+    return 1
+  fi
+}
+
+_gcdw() {
+  local -a worktrees
+  worktrees=(${(f)"$(git worktree list 2>/dev/null | awk '{print $1}' | xargs -n1 basename)"})
+  compadd -a worktrees
+}
+compdef _gcdw gcdw
