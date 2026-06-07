@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local secrets — defense in depth.
+# Real secret values live OUTSIDE this repo (default ~/.config/zsh/secrets.zsh,
+# loaded by modules/secrets.sh). These patterns ensure that even a stray copy
+# placed INSIDE the repo can never be committed. The tracked template
+# modules/secrets.example.zsh is deliberately not matched.
+secrets.zsh
+*.secret.zsh
+*.secrets.zsh
