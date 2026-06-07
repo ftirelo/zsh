@@ -108,3 +108,107 @@ _gcdw() {
   compadd -a worktrees
 }
 compdef _gcdw gcdw
+
+# gsync — sync allowlisted local checkouts with their remotes.
+#
+# For every repo on the allowlist (or just the ones named as arguments) this
+# runs depot_tools' `git rebase-update`, which fetches each remote and rebases
+# every local branch onto its upstream.
+#
+# Merge conflicts are handled with `--keep-going`: a branch that can't be
+# cleanly rebased has its rebase aborted — so that branch is left exactly as it
+# was — and the remaining branches are still updated. The untouched branches are
+# listed at the end so you know what to resolve by hand.
+#
+# If `git rebase-update` finishes with no branch checked out (HEAD detached,
+# e.g. every local branch was merged and cleaned up), gsync checks out `main`.
+#
+# Usage:
+#   gsync                  # sync the whole allowlist
+#   gsync orrery lift-api  # sync only these (must be on the allowlist)
+#
+# Override the search root with GSYNC_ROOT; edit GSYNC_REPOS for the allowlist.
+GSYNC_ROOT="${GSYNC_ROOT:-$HOME/workspace}"
+GSYNC_REPOS=(zsh gmail-filters lift-api personal-tracking orrery)
+
+# _gsync-one <repo-dir>
+# Sync a single checkout. Returns 1 if any branch was left untouched.
+_gsync-one() {
+    local dir="$1"
+    local name="${dir:t}"
+
+    if ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "Warning: skipping $name — not a git repository ($dir)"
+        return 0
+    fi
+
+    echo "➜ Syncing $name ..."
+
+    # `--keep-going` aborts a conflicting branch's rebase (leaving it untouched)
+    # and carries on, instead of stopping at the first conflict.
+    local out
+    out="$(cd "$dir" && git rebase-update --keep-going 2>&1)"
+    [[ -n "$out" ]] && print -r -- "$out" | sed 's/^/    /'
+
+    # The branches rebase-update reported as not cleanly rebased. The array
+    # literal context naturally drops the empty result when there were none.
+    local -a failed
+    failed=( ${(f)"$(print -r -- "$out" | awk '
+        /could not be cleanly rebased:/ { grab = 1; next }
+        grab && /^  / { print $1; next }
+        grab { grab = 0 }
+    ')"} )
+
+    # Land on main if rebase-update left HEAD detached (no current branch).
+    if [[ -z "$(git -C "$dir" branch --show-current)" ]]; then
+        if git -C "$dir" checkout main >/dev/null 2>&1; then
+            echo "    ➜ No branch was checked out; switched to main."
+        else
+            echo "    Warning: no branch checked out and could not switch to main."
+        fi
+    fi
+
+    if (( ${#failed} )); then
+        echo "    Left untouched (conflicts): ${failed[*]}"
+        return 1
+    fi
+    echo "    Up to date."
+    return 0
+}
+
+gsync() {
+    local -a targets
+    if (( $# )); then
+        local arg
+        for arg in "$@"; do
+            if (( ${GSYNC_REPOS[(Ie)$arg]} )); then
+                targets+=("$arg")
+            else
+                echo "Warning: $arg is not on the gsync allowlist; skipping."
+            fi
+        done
+    else
+        targets=("${GSYNC_REPOS[@]}")
+    fi
+    (( ${#targets} )) || { echo "Nothing to sync."; return 0; }
+
+    local -a problems
+    local repo
+    for repo in "${targets[@]}"; do
+        _gsync-one "$GSYNC_ROOT/$repo" || problems+=("$repo")
+        echo
+    done
+
+    echo "---"
+    if (( ${#problems} )); then
+        echo "Synced with conflicts in: ${problems[*]}"
+        echo "Their conflicting branches were left untouched — resolve them by hand."
+        return 1
+    fi
+    echo "All repos synced cleanly."
+    return 0
+}
+
+# Tab-complete gsync with the allowlisted repo names.
+_gsync() { compadd -a GSYNC_REPOS }
+compdef _gsync gsync
