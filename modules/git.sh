@@ -123,6 +123,11 @@ compdef _gcdw gcdw
 # If `git rebase-update` finishes with no branch checked out (HEAD detached,
 # e.g. every local branch was merged and cleaned up), gsync checks out `main`.
 #
+# Once a repo settles on `main`, gsync runs `npm install` for it — but only when
+# the sync changed the lockfile (or `node_modules` is missing). Node projects
+# whose dependencies didn't move, and checkouts left on a feature branch, are
+# untouched.
+#
 # Usage:
 #   gsync                  # sync the whole allowlist
 #   gsync orrery lift-api  # sync only these (must be on the allowlist)
@@ -130,6 +135,51 @@ compdef _gcdw gcdw
 # Override the search root with GSYNC_ROOT; edit GSYNC_REPOS for the allowlist.
 GSYNC_ROOT="${GSYNC_ROOT:-$HOME/workspace}"
 GSYNC_REPOS=(zsh gmail-filters lift-api personal-tracking orrery)
+
+# _gsync-deps-id <repo-dir>
+# Blob id of the main branch's npm manifest, used to detect dependency changes
+# across a sync. Prefers package-lock.json (what `npm install` resolves from) and
+# falls back to package.json. Empty when main has neither — i.e. not a Node repo.
+_gsync-deps-id() {
+    local dir="$1" id
+    id="$(git -C "$dir" rev-parse refs/heads/main:package-lock.json 2>/dev/null)"
+    [[ -n "$id" ]] || id="$(git -C "$dir" rev-parse refs/heads/main:package.json 2>/dev/null)"
+    print -r -- "$id"
+}
+
+# _gsync-maybe-npm-install <repo-dir> <deps-id-before>
+# Install npm dependencies for the main checkout when the sync changed them (or
+# they were never installed). No-op for non-Node repos and for checkouts left on
+# a branch other than main.
+_gsync-maybe-npm-install() {
+    local dir="$1" deps_before="$2"
+    local name="${dir:t}"
+
+    # Only the primary checkout (on main) gets dependencies installed.
+    [[ "$(git -C "$dir" branch --show-current)" == "main" ]] || return 0
+
+    # Not a Node project — nothing to install.
+    [[ -f "$dir/package.json" ]] || return 0
+
+    # Needed when the manifest moved during the sync, or nothing is installed yet.
+    local deps_after
+    deps_after="$(_gsync-deps-id "$dir")"
+    [[ "$deps_before" != "$deps_after" || ! -d "$dir/node_modules" ]] || return 0
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "    Warning: dependencies changed but npm is not installed."
+        return 0
+    fi
+
+    echo "    ➜ Installing npm dependencies ..."
+    local nout
+    if nout="$(cd "$dir" && npm install 2>&1)"; then
+        echo "    ➜ npm dependencies installed."
+    else
+        echo "    Warning: npm install failed in $name:"
+        print -r -- "$nout" | sed 's/^/    /'
+    fi
+}
 
 # _gsync-one <repo-dir>
 # Sync a single checkout. Returns 1 if any branch was left untouched.
@@ -143,6 +193,11 @@ _gsync-one() {
     fi
 
     echo "➜ Syncing $name ..."
+
+    # Fingerprint main's dependency manifest before the sync so we can tell
+    # afterward whether `git rebase-update` pulled in any dependency changes.
+    local deps_before
+    deps_before="$(_gsync-deps-id "$dir")"
 
     # `--keep-going` aborts a conflicting branch's rebase (leaving it untouched)
     # and carries on, instead of stopping at the first conflict.
@@ -167,6 +222,9 @@ _gsync-one() {
             echo "    Warning: no branch checked out and could not switch to main."
         fi
     fi
+
+    # Refresh dependencies if the sync moved them (main checkout only).
+    _gsync-maybe-npm-install "$dir" "$deps_before"
 
     if (( ${#failed} )); then
         echo "    Left untouched (conflicts): ${failed[*]}"
